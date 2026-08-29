@@ -21,6 +21,10 @@ ENV TZ=UTC
 
 COPY --from=builder /tcm_relay /tcm_relay
 
+# A relative DATABASE_PATH (including the built-in default) resolves
+# against the workdir — put it inside the volume so buffered telemetry
+# survives a container recreate.
+WORKDIR /data
 VOLUME /data
 
 ENTRYPOINT ["/tcm_relay"]
