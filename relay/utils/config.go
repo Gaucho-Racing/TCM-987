@@ -1,15 +1,21 @@
 package utils
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"relay/config"
 	"strconv"
+	"strings"
 	"time"
 )
 
 func VerifyConfig() {
 	if config.VehicleID == "" {
 		SugarLogger.Fatalln("VEHICLE_ID is not set")
+	}
+	if err := validTopicSegment(config.VehicleID); err != nil {
+		SugarLogger.Fatalf("VEHICLE_ID is not usable in a topic: %v", err)
 	}
 	key, err := strconv.Atoi(config.VehicleUploadKeyString)
 	if err != nil {
@@ -32,6 +38,12 @@ func VerifyConfig() {
 	config.DBQueueSize = parseIntWithFallback(config.DBQueueSizeRaw, 50000, "DB_QUEUE_SIZE")
 	config.DBBatchSize = parseIntWithFallback(config.DBBatchSizeRaw, 5000, "DB_BATCH_SIZE")
 	config.RetentionHours = parseIntWithFallback(config.RetentionHoursRaw, 72, "RETENTION_HOURS")
+
+	for _, iface := range config.CANInterfaces {
+		if err := validTopicSegment(iface.Label); err != nil {
+			SugarLogger.Fatalf("CAN_INTERFACES bus label %q is not usable in a topic: %v", iface.Label, err)
+		}
+	}
 
 	if config.LocalMQTTHost != "" && config.LocalMQTTPort == "" {
 		SugarLogger.Fatalln("LOCAL_MQTT_HOST is set but LOCAL_MQTT_PORT is not")
@@ -58,6 +70,27 @@ func VerifyConfig() {
 	SugarLogger.Infof("Local Publish Interval: %dms", config.LocalPublishIntervalInt)
 	SugarLogger.Infof("Cloud Publish Interval: %dms", config.CloudPublishIntervalInt)
 	SugarLogger.Infof("Ping Interval: %s", config.PingInterval)
+}
+
+// validTopicSegment rejects values that would change the shape of a
+// published topic. Mapache's ingest requires exactly four segments and
+// reads the vehicle from segment 1, so a "/" here shifts every field and
+// the ingest drops the message — silently, since we publish at QoS 0 and
+// never learn it was rejected. MQTT also forbids wildcards in a topic
+// being published to.
+func validTopicSegment(s string) error {
+	if s == "" {
+		return errors.New("must not be empty")
+	}
+	for _, bad := range []string{"/", "+", "#"} {
+		if strings.Contains(s, bad) {
+			return fmt.Errorf("must not contain %q", bad)
+		}
+	}
+	if strings.TrimSpace(s) != s || strings.ContainsAny(s, " \t\r\n") {
+		return errors.New("must not contain whitespace")
+	}
+	return nil
 }
 
 func resolvedPath(path string) string {
