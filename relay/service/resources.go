@@ -32,43 +32,84 @@ func InitializeResourceQuery() {
 	}()
 }
 
-// PublishResources keeps TCM-26's 44-byte 0x201 layout so the
-// Mapache-side decoder can be shared across both TCMs.
+// resourcePayloadSize is the 0x201 data length:
+//
+//	[0:12]  4 × (freq u16 LE MHz, util u8 %)
+//	[12]    cpu_total_util u8 %
+//	[13:15] ram_total  u16 LE MB
+//	[15:17] ram_used   u16 LE MB
+//	[17]    ram_util   u8 %
+//	[18:22] disk_total u32 LE MB
+//	[22:26] disk_used  u32 LE MB
+//	[26]    disk_util  u8 %
+//	[27]    cpu_temp   u8 °C
+//	[28]    throttle_flags u8
+const resourcePayloadSize = 29
+
+func encodeResourcePayload(m model.ResourceMetrics) []byte {
+	data := make([]byte, resourcePayloadSize)
+
+	off := 0
+	for i := 0; i < model.ReportedCPUs; i++ {
+		binary.LittleEndian.PutUint16(data[off:off+2], clampU16(m.CPUFreq[i]))
+		data[off+2] = clampU8(m.CPUUtil[i])
+		off += 3
+	}
+
+	data[off] = clampU8(m.CPUTotalUtil)
+	off++
+	binary.LittleEndian.PutUint16(data[off:off+2], clampU16(m.RAMTotal))
+	off += 2
+	binary.LittleEndian.PutUint16(data[off:off+2], clampU16(m.RAMUsed))
+	off += 2
+	data[off] = clampU8(m.RAMUtil)
+	off++
+	binary.LittleEndian.PutUint32(data[off:off+4], clampU32(m.DiskTotal))
+	off += 4
+	binary.LittleEndian.PutUint32(data[off:off+4], clampU32(m.DiskUsed))
+	off += 4
+	data[off] = clampU8(m.DiskUtil)
+	off++
+	data[off] = clampU8(m.CPUTemp)
+	off++
+	data[off] = clampU8(m.ThrottleFlags)
+
+	return data
+}
+
+// Saturate rather than wrap: a bogus reading should pin the field, not
+// alias to a plausible-looking small number on the dashboard.
+func clampU8(v int) byte {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return byte(v)
+}
+
+func clampU16(v int) uint16 {
+	if v < 0 {
+		return 0
+	}
+	if v > 65535 {
+		return 65535
+	}
+	return uint16(v)
+}
+
+func clampU32(v int) uint32 {
+	if v < 0 {
+		return 0
+	}
+	if v > 4294967295 {
+		return 4294967295
+	}
+	return uint32(v)
+}
+
 func PublishResources(metrics model.ResourceMetrics) {
 	topic := fmt.Sprintf("%s/%s/tcm/0x201", config.TopicRoot, config.VehicleID)
-
-	dataPayload := make([]byte, 44)
-	binary.LittleEndian.PutUint16(dataPayload[:2], uint16(metrics.CPU0Freq))
-	dataPayload[2] = byte(metrics.CPU0Util)
-	binary.LittleEndian.PutUint16(dataPayload[3:5], uint16(metrics.CPU1Freq))
-	dataPayload[5] = byte(metrics.CPU1Util)
-	binary.LittleEndian.PutUint16(dataPayload[6:8], uint16(metrics.CPU2Freq))
-	dataPayload[8] = byte(metrics.CPU2Util)
-	binary.LittleEndian.PutUint16(dataPayload[9:11], uint16(metrics.CPU3Freq))
-	dataPayload[11] = byte(metrics.CPU3Util)
-	binary.LittleEndian.PutUint16(dataPayload[12:14], uint16(metrics.CPU4Freq))
-	dataPayload[14] = byte(metrics.CPU4Util)
-	binary.LittleEndian.PutUint16(dataPayload[15:17], uint16(metrics.CPU5Freq))
-	dataPayload[17] = byte(metrics.CPU5Util)
-	dataPayload[18] = byte(metrics.CPUTotalUtil)
-	binary.LittleEndian.PutUint16(dataPayload[19:21], uint16(metrics.RAMTotal))
-	binary.LittleEndian.PutUint16(dataPayload[21:23], uint16(metrics.RAMUsed))
-	dataPayload[23] = byte(metrics.RAMUtil)
-	dataPayload[24] = byte(metrics.GPUUtil)
-	binary.LittleEndian.PutUint16(dataPayload[25:27], uint16(metrics.GPUFreq))
-	binary.LittleEndian.PutUint32(dataPayload[27:31], uint32(metrics.DiskTotal))
-	binary.LittleEndian.PutUint32(dataPayload[31:35], uint32(metrics.DiskUsed))
-	dataPayload[35] = byte(metrics.DiskUtil)
-	dataPayload[36] = byte(metrics.CPUTemp)
-	dataPayload[37] = byte(metrics.GPUTemp)
-	binary.LittleEndian.PutUint16(dataPayload[38:40], uint16(metrics.VoltageDraw))
-	binary.LittleEndian.PutUint16(dataPayload[40:42], uint16(metrics.CurrentDraw))
-	binary.LittleEndian.PutUint16(dataPayload[42:44], uint16(metrics.PowerDraw))
-
-	payload := make([]byte, 10, 54)
-	binary.BigEndian.PutUint64(payload[0:8], uint64(time.Now().UnixMicro()))
-	binary.BigEndian.PutUint16(payload[8:10], config.VehicleUploadKey)
-	payload = append(payload, dataPayload...)
-
-	mqtt.Publish(topic, 0, false, payload)
+	mqtt.Publish(topic, 0, false, encodePayload(uint64(time.Now().UnixMicro()), encodeResourcePayload(metrics)))
 }

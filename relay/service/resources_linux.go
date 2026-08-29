@@ -15,8 +15,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const maxReportedCPUs = 6
-
 type cpuSample struct {
 	total uint64
 	idle  uint64
@@ -26,9 +24,8 @@ var cpuSampleMu sync.Mutex
 var prevCPUSamples map[string]cpuSample
 
 // QueryResourceMetrics reads Pi resource stats straight from /proc and
-// /sys — no jtop equivalent needed. CPU utilization is the delta since
-// the previous call (the 10s poll cadence is the smoothing window), so
-// the first call reports 0%.
+// /sys. CPU utilization is the delta since the previous call (the 10s poll
+// cadence is the smoothing window), so the first call reports 0%.
 func QueryResourceMetrics() (model.ResourceMetrics, error) {
 	var m model.ResourceMetrics
 
@@ -37,13 +34,11 @@ func QueryResourceMetrics() (model.ResourceMetrics, error) {
 		return m, fmt.Errorf("cpu utilization: %w", err)
 	}
 	m.CPUTotalUtil = total
-	perCore := [maxReportedCPUs]*int{&m.CPU0Util, &m.CPU1Util, &m.CPU2Util, &m.CPU3Util, &m.CPU4Util, &m.CPU5Util}
-	perFreq := [maxReportedCPUs]*int{&m.CPU0Freq, &m.CPU1Freq, &m.CPU2Freq, &m.CPU3Freq, &m.CPU4Freq, &m.CPU5Freq}
-	for i := 0; i < maxReportedCPUs; i++ {
+	for i := 0; i < model.ReportedCPUs; i++ {
 		if i < len(utils) {
-			*perCore[i] = utils[i]
+			m.CPUUtil[i] = utils[i]
 		}
-		*perFreq[i] = readCPUFreqMHz(i)
+		m.CPUFreq[i] = readCPUFreqMHz(i)
 	}
 
 	ramTotal, ramUsed, err := readMemInfo()
@@ -64,6 +59,7 @@ func QueryResourceMetrics() (model.ResourceMetrics, error) {
 	}
 
 	m.CPUTemp = readCPUTemp()
+	m.ThrottleFlags = readThrottleFlags()
 
 	return m, nil
 }
@@ -188,4 +184,80 @@ func readCPUTemp() int {
 		return 0
 	}
 	return milli / 1000
+}
+
+// Firmware get_throttled bit positions (raspberrypi.com/documentation
+// "vcgencmd get_throttled"). The low nibble is live state, bits 16+ are
+// sticky since boot.
+const (
+	fwUndervoltage      = 1 << 0
+	fwThrottled         = 1 << 2
+	fwUndervoltageSince = 1 << 16
+	fwThrottledSince    = 1 << 18
+)
+
+const (
+	throttledPath = "/sys/devices/platform/soc/soc:firmware/get_throttled"
+	hwmonGlob     = "/sys/class/hwmon/hwmon*/in0_lcrit_alarm"
+)
+
+// readThrottleFlags reports under-voltage and thermal throttling. On the
+// Pi both are handled in firmware rather than by the kernel thermal
+// governor, so the firmware's get_throttled word is the only place the
+// live bits are visible. That attribute is deprecated upstream, so fall
+// back to the rpi_volt hwmon alarm — which exposes only the sticky
+// under-voltage bit, nothing thermal and nothing live.
+func readThrottleFlags() int {
+	raw, err := readThrottledWord()
+	if err != nil {
+		return readUndervoltageAlarm()
+	}
+
+	var flags int
+	if raw&fwUndervoltage != 0 {
+		flags |= model.ThrottleUndervoltage
+	}
+	if raw&fwUndervoltageSince != 0 {
+		flags |= model.ThrottleUndervoltageSince
+	}
+	if raw&fwThrottled != 0 {
+		flags |= model.ThrottleThermal
+	}
+	if raw&fwThrottledSince != 0 {
+		flags |= model.ThrottleThermalSince
+	}
+	return flags
+}
+
+func readThrottledWord() (uint64, error) {
+	data, err := os.ReadFile(throttledPath)
+	if err != nil {
+		return 0, err
+	}
+	// The attribute is printed as bare hex; vcgencmd renders the same word
+	// with an 0x prefix, so tolerate both.
+	text := strings.TrimPrefix(strings.TrimSpace(string(data)), "0x")
+	return strconv.ParseUint(text, 16, 64)
+}
+
+func readUndervoltageAlarm() int {
+	matches, err := filepath.Glob(hwmonGlob)
+	if err != nil {
+		return 0
+	}
+	for _, path := range matches {
+		name, err := os.ReadFile(filepath.Join(filepath.Dir(path), "name"))
+		if err != nil || strings.TrimSpace(string(name)) != "rpi_volt" {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(data)) == "1" {
+			return model.ThrottleUndervoltageSince
+		}
+		return 0
+	}
+	return 0
 }
