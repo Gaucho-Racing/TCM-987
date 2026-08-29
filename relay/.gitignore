@@ -1,0 +1,18 @@
+.env
+tmp/
+
+# Local SQLite database (WAL mode leaves sidecar files)
+*.db
+*.db-wal
+*.db-shm
+
+# Go build artifacts
+*.exe
+*.test
+*.out
+coverage.html
+go.work
+
+.vscode/
+.idea/
+.DS_Store

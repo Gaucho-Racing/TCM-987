@@ -1,0 +1,50 @@
+name: tcm987-dev
+
+# All services run on host networking — socketcan interfaces (can0/vcan0)
+# live in the host network namespace, so the relay must share it to see
+# them. This is the dev compose: the relay builds from local source under
+# air for hot reload, no restart policy so crashes are visible in
+# `docker compose logs`. nanomq is included so `mosquitto_sub -t 'p987/#'`
+# works locally; production can drop it (leave LOCAL_MQTT_HOST empty).
+
+services:
+    relay:
+        build:
+            context: .
+            dockerfile: relay/Dockerfile.dev
+        network_mode: host
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        volumes:
+            - ./relay:/app/relay
+            - relay_go_cache:/go
+            - relay_data:/data
+        environment:
+            ENV: "DEV"
+            VEHICLE_ID: ${VEHICLE_ID}
+            VEHICLE_UPLOAD_KEY: ${VEHICLE_UPLOAD_KEY}
+            DATABASE_PATH: /data/relay.db
+            LOCAL_MQTT_HOST: localhost
+            LOCAL_MQTT_PORT: "1883"
+            CLOUD_MQTT_HOST: ${CLOUD_MQTT_HOST}
+            CLOUD_MQTT_PORT: ${CLOUD_MQTT_PORT}
+            CLOUD_MQTT_USER: ${CLOUD_MQTT_USER}
+            CLOUD_MQTT_PASSWORD: ${CLOUD_MQTT_PASSWORD}
+            CAN_INTERFACES: ${CAN_INTERFACES}
+            VIRTUAL_CAN_PORTS: "8100"
+            LOCAL_PUBLISH_INTERVAL: "20"
+            CLOUD_PUBLISH_INTERVAL: "100"
+            PING_INTERVAL: "5000"
+            DB_QUEUE_SIZE: "50000"
+            DB_BATCH_SIZE: "5000"
+            RETENTION_HOURS: "72"
+        depends_on:
+            - nanomq
+
+    nanomq:
+        image: emqx/nanomq:latest
+        network_mode: host
+
+volumes:
+    relay_go_cache:
+    relay_data:

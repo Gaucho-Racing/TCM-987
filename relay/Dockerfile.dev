@@ -1,0 +1,7 @@
+FROM golang:1.26-bookworm
+
+RUN go install github.com/air-verse/air@latest
+
+WORKDIR /app/relay
+
+CMD ["air", "-c", ".air.toml"]
