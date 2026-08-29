@@ -21,17 +21,38 @@ func InitializePings() {
 			time.Sleep(config.PingInterval)
 		}
 	}()
-	go func() {
-		warnAfter := config.PingInterval * 2
-		for {
-			lastPing := FindLastSuccessfulPing()
-			ageMs := time.Now().UnixMilli() - int64(lastPing.Ping)
-			if ageMs > warnAfter.Milliseconds() {
-				utils.SugarLogger.Warnf("Last successful ping was %.2fs ago", float64(ageMs)/1000)
+	go runPingWatchdog()
+}
+
+// staleWarnInterval rate-limits the offline warning. The check itself stays
+// frequent so TCM Status reacts quickly, but a road car sits unreachable in
+// a garage for days — logging every poll would be tens of thousands of
+// lines a day onto the SD card.
+const staleWarnInterval = 60 * time.Second
+
+func runPingWatchdog() {
+	warnAfter := config.PingInterval * 2
+	var lastWarn time.Time
+
+	for {
+		// Ping is stored as UnixMicro by PublishPing — compare in the same
+		// unit or the age is nonsense.
+		lastPing := FindLastSuccessfulPing()
+		stale := lastPing.Ping == 0 ||
+			time.Now().UnixMicro()-int64(lastPing.Ping) > warnAfter.Microseconds()
+
+		if stale && time.Since(lastWarn) >= staleWarnInterval {
+			if lastPing.Ping == 0 {
+				utils.SugarLogger.Warnln("No successful ping yet")
+			} else {
+				age := time.Now().UnixMicro() - int64(lastPing.Ping)
+				utils.SugarLogger.Warnf("Last successful ping was %.2fs ago", float64(age)/1e6)
 			}
-			time.Sleep(2345 * time.Millisecond)
+			lastWarn = time.Now()
 		}
-	}()
+
+		time.Sleep(2345 * time.Millisecond)
+	}
 }
 
 func SubscribePong() {
