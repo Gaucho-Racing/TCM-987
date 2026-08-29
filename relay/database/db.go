@@ -2,9 +2,12 @@ package database
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"relay/config"
 	"relay/model"
 	"relay/utils"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	cmap "github.com/orcaman/concurrent-map/v2"
@@ -58,11 +61,22 @@ func Close() {
 	utils.SugarLogger.Infoln("[DB] Closed")
 }
 
+// gormLogger silences "record not found", which is a normal result here —
+// the ping watchdog polls for a successful pong every few seconds and gets
+// none until the car first reaches Mapache. Left at the default it writes
+// a colorized SQL dump to the SD card on every poll, forever, while the
+// car is offline.
 func gormLogger() logger.Interface {
+	level := logger.Error
 	if config.Env == "DEV" {
-		return logger.Default.LogMode(logger.Warn)
+		level = logger.Warn
 	}
-	return logger.Default.LogMode(logger.Error)
+	return logger.New(log.New(os.Stdout, "", log.LstdFlags), logger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  level,
+		IgnoreRecordNotFoundError: true,
+		Colorful:                  config.Env == "DEV",
+	})
 }
 
 func InitializeMap() {

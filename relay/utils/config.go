@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"path/filepath"
 	"relay/config"
 	"strconv"
 	"time"
@@ -32,19 +33,46 @@ func VerifyConfig() {
 	config.DBBatchSize = parseIntWithFallback(config.DBBatchSizeRaw, 5000, "DB_BATCH_SIZE")
 	config.RetentionHours = parseIntWithFallback(config.RetentionHoursRaw, 72, "RETENTION_HOURS")
 
+	if config.LocalMQTTHost != "" && config.LocalMQTTPort == "" {
+		SugarLogger.Fatalln("LOCAL_MQTT_HOST is set but LOCAL_MQTT_PORT is not")
+	}
+	if config.CloudMQTTHost != "" && config.CloudMQTTPort == "" {
+		SugarLogger.Fatalln("CLOUD_MQTT_HOST is set but CLOUD_MQTT_PORT is not")
+	}
+
 	if len(config.CANInterfaces) == 0 && len(config.VirtualCANPorts) == 0 {
 		SugarLogger.Warnln("No CAN_INTERFACES or VIRTUAL_CAN_PORTS configured — relay has no frame sources")
 	}
 
 	SugarLogger.Infof("Vehicle ID: %s", config.VehicleID)
 	SugarLogger.Infof("Vehicle Upload Key: %d", config.VehicleUploadKey)
-	SugarLogger.Infof("Database Path: %s", config.DatabasePath)
+	// Resolved, not raw: the default is relative and lands wherever the
+	// workdir points (inside /data in the image), which is not obvious
+	// from the configured value alone.
+	SugarLogger.Infof("Database Path: %s", resolvedPath(config.DatabasePath))
 	for _, iface := range config.CANInterfaces {
 		SugarLogger.Infof("CAN Interface: %s (bus %s)", iface.Name, iface.Label)
 	}
+	SugarLogger.Infof("Local Broker: %s", brokerEndpoint(config.LocalMQTTHost, config.LocalMQTTPort))
+	SugarLogger.Infof("Cloud Broker: %s", brokerEndpoint(config.CloudMQTTHost, config.CloudMQTTPort))
 	SugarLogger.Infof("Local Publish Interval: %dms", config.LocalPublishIntervalInt)
 	SugarLogger.Infof("Cloud Publish Interval: %dms", config.CloudPublishIntervalInt)
 	SugarLogger.Infof("Ping Interval: %s", config.PingInterval)
+}
+
+func resolvedPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return abs
+}
+
+func brokerEndpoint(host, port string) string {
+	if host == "" {
+		return "disabled"
+	}
+	return host + ":" + port
 }
 
 func parseIntWithFallback(raw string, fallback int, name string) int {
