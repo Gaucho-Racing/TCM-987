@@ -19,13 +19,14 @@ const canFrameSize = 16
 
 const reopenBackoff = 5 * time.Second
 
-// RunSocketCAN starts one reader per configured interface and blocks
-// forever so main has something to park on.
-func RunSocketCAN() {
+// StartSocketCAN starts one reader per configured interface and returns.
+// The readers run until the process exits — there is no clean way to
+// interrupt a blocking recv on a raw CAN socket, and nothing downstream
+// needs them stopped before the database queue drains.
+func StartSocketCAN() {
 	for _, iface := range config.CANInterfaces {
 		go runReader(iface)
 	}
-	select {}
 }
 
 // runReader reads frames until an error, then reopens after a backoff —
@@ -71,22 +72,38 @@ func readFrames(iface config.CANInterface) error {
 			continue
 		}
 
-		rawID := binary.LittleEndian.Uint32(frame[0:4])
-		if rawID&(unix.CAN_RTR_FLAG|unix.CAN_ERR_FLAG) != 0 {
+		canID, data, ok := parseCANFrame(frame)
+		if !ok {
 			continue
 		}
-		canID := rawID & unix.CAN_SFF_MASK
-		if rawID&unix.CAN_EFF_FLAG != 0 {
-			canID = rawID & unix.CAN_EFF_MASK
-		}
 
-		length := int(frame[4])
-		if length > 8 {
-			length = 8
-		}
-		data := make([]byte, length)
-		copy(data, frame[8:8+length])
-
-		go PublishData(iface.Label, canID, data)
+		// Inline, not `go`: PublishData only touches bounded queues, and a
+		// goroutine per frame would put the whole bus through the scheduler.
+		PublishData(iface.Label, canID, data)
 	}
+}
+
+// parseCANFrame decodes a classic can_frame, reporting ok=false for RTR
+// and error frames, which carry no telemetry.
+func parseCANFrame(frame []byte) (canID uint32, data []byte, ok bool) {
+	if len(frame) < canFrameSize {
+		return 0, nil, false
+	}
+
+	rawID := binary.LittleEndian.Uint32(frame[0:4])
+	if rawID&(unix.CAN_RTR_FLAG|unix.CAN_ERR_FLAG) != 0 {
+		return 0, nil, false
+	}
+	canID = rawID & unix.CAN_SFF_MASK
+	if rawID&unix.CAN_EFF_FLAG != 0 {
+		canID = rawID & unix.CAN_EFF_MASK
+	}
+
+	length := int(frame[4])
+	if length > 8 {
+		length = 8
+	}
+	data = make([]byte, length)
+	copy(data, frame[8:8+length])
+	return canID, data, true
 }

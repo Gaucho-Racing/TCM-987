@@ -37,37 +37,40 @@ func InitializeTCMStatus() {
 
 func publishTCMStatus() {
 	inet, mqttOK, clock, lastPongAt, lastPongRTT := state.snapshot()
-
 	mapacheOK := !lastPongAt.IsZero() && time.Since(lastPongAt) < mapachePongFreshness()
 
-	var statusBits byte
-	if inet {
-		statusBits |= tcmStatusConnectionOK
-	}
-	if mqttOK {
-		statusBits |= tcmStatusMQTTOK
-	}
-	if mapacheOK {
-		statusBits |= tcmStatusMapacheOK
-	}
-	if clock {
-		statusBits |= tcmStatusClockOK
-	}
-
-	// TCM Status payload layout (8 bytes):
-	//   [0]    status_bits
-	//   [1:3]  mapache_ping (u16, ms, little-endian)
-	//   [3:8]  reserved
-	dataPayload := make([]byte, 8)
-	dataPayload[0] = statusBits
-	binary.LittleEndian.PutUint16(dataPayload[1:3], lastPongRTT)
-
-	payload := make([]byte, 10, 18)
-	binary.BigEndian.PutUint64(payload[0:8], uint64(time.Now().UnixMicro()))
-	binary.BigEndian.PutUint16(payload[8:10], config.VehicleUploadKey)
-	payload = append(payload, dataPayload...)
+	bits := statusBits(inet, mqttOK, mapacheOK, clock)
 
 	topic := fmt.Sprintf("%s/%s/tcm/0x200", config.TopicRoot, config.VehicleID)
-	mqtt.Publish(topic, 0, false, payload)
-	utils.SugarLogger.Debugf("[TCM] published status: bits=%08b latency=%dms", statusBits, lastPongRTT)
+	mqtt.Publish(topic, 0, false, encodePayload(uint64(time.Now().UnixMicro()), encodeTCMStatus(bits, lastPongRTT)))
+	utils.SugarLogger.Debugf("[TCM] published status: bits=%08b latency=%dms", bits, lastPongRTT)
+}
+
+func statusBits(inet, mqttOK, mapacheOK, clock bool) byte {
+	var bits byte
+	if inet {
+		bits |= tcmStatusConnectionOK
+	}
+	if mqttOK {
+		bits |= tcmStatusMQTTOK
+	}
+	if mapacheOK {
+		bits |= tcmStatusMapacheOK
+	}
+	if clock {
+		bits |= tcmStatusClockOK
+	}
+	return bits
+}
+
+// TCM Status data layout (8 bytes):
+//
+//	[0]    status_bits
+//	[1:3]  mapache_ping (u16, ms, little-endian)
+//	[3:8]  reserved
+func encodeTCMStatus(bits byte, pingMs uint16) []byte {
+	data := make([]byte, 8)
+	data[0] = bits
+	binary.LittleEndian.PutUint16(data[1:3], pingMs)
+	return data
 }

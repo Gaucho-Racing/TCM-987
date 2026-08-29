@@ -40,6 +40,24 @@ func InitializeDB() {
 	DB = db
 }
 
+// Close releases the SQLite handle so WAL checkpointing completes before
+// the process exits.
+func Close() {
+	if DB == nil {
+		return
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		utils.SugarLogger.Errorf("[DB] Failed to get underlying handle: %v", err)
+		return
+	}
+	if err := sqlDB.Close(); err != nil {
+		utils.SugarLogger.Errorf("[DB] Failed to close: %v", err)
+		return
+	}
+	utils.SugarLogger.Infoln("[DB] Closed")
+}
+
 func gormLogger() logger.Interface {
 	if config.Env == "DEV" {
 		return logger.Default.LogMode(logger.Warn)

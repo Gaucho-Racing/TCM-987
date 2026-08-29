@@ -1,11 +1,14 @@
 package main
 
 import (
+	"os"
+	"os/signal"
 	"relay/config"
 	"relay/database"
 	"relay/mqtt"
 	"relay/service"
 	"relay/utils"
+	"syscall"
 )
 
 func main() {
@@ -30,5 +33,17 @@ func main() {
 	for _, port := range config.VirtualCANPorts {
 		go service.ListenVirtualCAN(port)
 	}
-	service.RunSocketCAN()
+	service.StartSocketCAN()
+
+	// Park until the container is stopped, then flush the write queue
+	// before exiting — a full batch is DB_BATCH_SIZE frames that would
+	// otherwise never reach the disk.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-stop
+	utils.SugarLogger.Infof("Received %s, shutting down", sig)
+
+	service.StopDBQueue()
+	mqtt.Disconnect()
+	database.Close()
 }

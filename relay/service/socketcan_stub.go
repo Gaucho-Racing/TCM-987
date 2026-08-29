@@ -7,9 +7,8 @@ import (
 	"relay/utils"
 )
 
-func RunSocketCAN() {
+func StartSocketCAN() {
 	if len(config.CANInterfaces) > 0 {
 		utils.SugarLogger.Warnf("socketcan requires linux; ignoring CAN_INTERFACES (%d configured)", len(config.CANInterfaces))
 	}
-	select {}
 }

@@ -87,10 +87,7 @@ func PublishPing() {
 	topic := fmt.Sprintf("%s/%s/tcm/ping", config.TopicRoot, config.VehicleID)
 	micros := time.Now().UnixMicro()
 	go CreatePing(int(micros))
-	payload := make([]byte, 10)
-	binary.BigEndian.PutUint64(payload[0:8], uint64(micros))
-	binary.BigEndian.PutUint16(payload[8:10], config.VehicleUploadKey)
-	mqtt.Publish(topic, 0, false, payload)
+	mqtt.Publish(topic, 0, false, encodePayload(uint64(micros), nil))
 }
 
 func CreatePing(ping int) {
