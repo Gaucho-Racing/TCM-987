@@ -9,9 +9,33 @@ on:
       - "**"
 
 jobs:
+  test:
+    runs-on: ubuntu-24.04
+    name: Test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: relay/go.mod
+          cache-dependency-path: relay/go.sum
+
+      - name: Vet
+        working-directory: relay
+        run: go vet ./...
+
+      - name: Test
+        working-directory: relay
+        run: go test -race ./...
+
   build:
     runs-on: ${{ matrix.runner }}
     name: Build ${{ matrix.platform }}
+    # Don't push an image for a tree that doesn't pass its own tests.
+    needs: test
     strategy:
       fail-fast: false
       matrix:
