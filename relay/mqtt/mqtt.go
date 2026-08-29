@@ -146,6 +146,8 @@ type publishQueue struct {
 	jobs    chan publishJob
 	dropped atomic.Uint64
 	wg      sync.WaitGroup
+	mu      sync.RWMutex
+	stopped bool
 }
 
 var localQueue *publishQueue
@@ -194,6 +196,18 @@ func (q *publishQueue) reportDrops() {
 }
 
 func (q *publishQueue) enqueue(topic string, qos byte, retained bool, payload []byte) {
+	// Held across the send: Disconnect closes the channel under the write
+	// lock, so no sender can be mid-send when it does. The CAN readers have
+	// no shutdown path — they block in recv until the process exits — so
+	// they keep publishing throughout shutdown, and without this they send
+	// on a closed channel and take the process down.
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	if q.stopped {
+		return
+	}
+
 	select {
 	case q.jobs <- publishJob{topic: topic, qos: qos, retained: retained, payload: payload}:
 	default:
@@ -236,7 +250,15 @@ func Disconnect() {
 		if q == nil {
 			continue
 		}
+		q.mu.Lock()
+		if q.stopped {
+			q.mu.Unlock()
+			continue
+		}
+		q.stopped = true
 		close(q.jobs)
+		q.mu.Unlock()
+
 		q.wg.Wait()
 		if q.client.IsConnected() {
 			q.client.Disconnect(250)
