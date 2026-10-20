@@ -4,8 +4,9 @@ name: tcm987-dev
 # live in the host network namespace, so the relay must share it to see
 # them. This is the dev compose: the relay builds from local source under
 # air for hot reload, no restart policy so crashes are visible in
-# `docker compose logs`. nanomq is included so `mosquitto_sub -t 'p987/#'`
-# works locally; production can drop it (leave LOCAL_MQTT_HOST empty).
+# `docker compose logs`. NanoMQ is included for development with
+# LOCAL_MQTT_HOST=localhost and LOCAL_MQTT_PORT=1883. Set those variables
+# to another endpoint to publish to an external broker.
 
 services:
     relay:
@@ -24,13 +25,19 @@ services:
             VEHICLE_ID: ${VEHICLE_ID}
             VEHICLE_UPLOAD_KEY: ${VEHICLE_UPLOAD_KEY}
             DATABASE_PATH: /data/relay.db
-            LOCAL_MQTT_HOST: localhost
-            LOCAL_MQTT_PORT: "1883"
+            LOCAL_MQTT_HOST: ${LOCAL_MQTT_HOST-localhost}
+            LOCAL_MQTT_PORT: ${LOCAL_MQTT_PORT:-1883}
+            LOCAL_MQTT_USER: ${LOCAL_MQTT_USER:-}
+            LOCAL_MQTT_PASSWORD: ${LOCAL_MQTT_PASSWORD:-}
             CLOUD_MQTT_HOST: ${CLOUD_MQTT_HOST}
             CLOUD_MQTT_PORT: ${CLOUD_MQTT_PORT}
             CLOUD_MQTT_USER: ${CLOUD_MQTT_USER}
             CLOUD_MQTT_PASSWORD: ${CLOUD_MQTT_PASSWORD}
             CAN_INTERFACES: ${CAN_INTERFACES}
+            SEEED_CAN_PORTS: ${SEEED_CAN_PORTS:-}
+            SEEED_CAN_BITRATE: ${SEEED_CAN_BITRATE:-500000}
+            SEEED_SERIAL_BAUD: ${SEEED_SERIAL_BAUD:-2000000}
+            SEEED_FRAME_TYPE: ${SEEED_FRAME_TYPE:-STD}
             VIRTUAL_CAN_PORTS: "8100"
             LOCAL_PUBLISH_INTERVAL: "20"
             CLOUD_PUBLISH_INTERVAL: "100"

@@ -44,6 +44,32 @@ func VerifyConfig() {
 			SugarLogger.Fatalf("CAN_INTERFACES bus label %q is not usable in a topic: %v", iface.Label, err)
 		}
 	}
+	config.SeeedCANBitrate = parseIntWithFallback(config.SeeedCANBitrateRaw, 500000, "SEEED_CAN_BITRATE")
+	config.SeeedSerialBaud = parseIntWithFallback(config.SeeedSerialBaudRaw, 2000000, "SEEED_SERIAL_BAUD")
+	if config.SeeedFrameType == "" {
+		config.SeeedFrameType = "STD"
+	}
+	if len(config.SeeedCANPorts) > 0 {
+		if _, supported := config.SeeedSpeedCodes[config.SeeedCANBitrate]; !supported {
+			SugarLogger.Fatalf("Unsupported SEEED_CAN_BITRATE: %d", config.SeeedCANBitrate)
+		}
+		if config.SeeedSerialBaud <= 0 || config.SeeedSerialBaud > 3000000 {
+			SugarLogger.Fatalln("SEEED_SERIAL_BAUD must be between 1 and 3000000")
+		}
+		if config.SeeedFrameType != "STD" && config.SeeedFrameType != "EXT" {
+			SugarLogger.Fatalln("SEEED_FRAME_TYPE must be STD or EXT")
+		}
+	}
+	seenPorts := make(map[string]bool)
+	for _, port := range config.SeeedCANPorts {
+		if !filepath.IsAbs(port.Name) || seenPorts[port.Name] {
+			SugarLogger.Fatalf("SEEED_CAN_PORTS requires unique absolute device paths: %q", port.Name)
+		}
+		seenPorts[port.Name] = true
+		if err := validTopicSegment(port.Label); err != nil {
+			SugarLogger.Fatalf("SEEED_CAN_PORTS bus label %q is not usable in a topic: %v", port.Label, err)
+		}
+	}
 
 	if config.LocalMQTTHost != "" && config.LocalMQTTPort == "" {
 		SugarLogger.Fatalln("LOCAL_MQTT_HOST is set but LOCAL_MQTT_PORT is not")
@@ -52,8 +78,8 @@ func VerifyConfig() {
 		SugarLogger.Fatalln("CLOUD_MQTT_HOST is set but CLOUD_MQTT_PORT is not")
 	}
 
-	if len(config.CANInterfaces) == 0 && len(config.VirtualCANPorts) == 0 {
-		SugarLogger.Warnln("No CAN_INTERFACES or VIRTUAL_CAN_PORTS configured — relay has no frame sources")
+	if len(config.CANInterfaces) == 0 && len(config.SeeedCANPorts) == 0 && len(config.VirtualCANPorts) == 0 {
+		SugarLogger.Warnln("No CAN_INTERFACES, SEEED_CAN_PORTS or VIRTUAL_CAN_PORTS configured — relay has no frame sources")
 	}
 
 	SugarLogger.Infof("Vehicle ID: %s", config.VehicleID)
@@ -64,6 +90,9 @@ func VerifyConfig() {
 	SugarLogger.Infof("Database Path: %s", resolvedPath(config.DatabasePath))
 	for _, iface := range config.CANInterfaces {
 		SugarLogger.Infof("CAN Interface: %s (bus %s)", iface.Name, iface.Label)
+	}
+	for _, port := range config.SeeedCANPorts {
+		SugarLogger.Infof("Seeed CAN: %s (bus %s, CAN %d bps, serial %d baud, %s, listen-only)", port.Name, port.Label, config.SeeedCANBitrate, config.SeeedSerialBaud, config.SeeedFrameType)
 	}
 	SugarLogger.Infof("Local Broker: %s", brokerEndpoint(config.LocalMQTTHost, config.LocalMQTTPort))
 	SugarLogger.Infof("Cloud Broker: %s", brokerEndpoint(config.CloudMQTTHost, config.CloudMQTTPort))

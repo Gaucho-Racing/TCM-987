@@ -52,6 +52,28 @@ type CANInterface struct {
 // itself as the label.
 var CANInterfaces = parseInterfaceList(os.Getenv("CAN_INTERFACES"))
 
+var SeeedCANPorts = parseInterfaceList(os.Getenv("SEEED_CAN_PORTS"))
+var SeeedCANBitrateRaw = os.Getenv("SEEED_CAN_BITRATE")
+var SeeedCANBitrate int
+var SeeedSerialBaudRaw = os.Getenv("SEEED_SERIAL_BAUD")
+var SeeedSerialBaud int
+var SeeedFrameType = strings.ToUpper(os.Getenv("SEEED_FRAME_TYPE"))
+
+var SeeedSpeedCodes = map[int]byte{
+	1000000: 0x01,
+	800000:  0x02,
+	500000:  0x03,
+	400000:  0x04,
+	250000:  0x05,
+	200000:  0x06,
+	125000:  0x07,
+	100000:  0x08,
+	50000:   0x09,
+	20000:   0x0a,
+	10000:   0x0b,
+	5000:    0x0c,
+}
+
 func parseInterfaceList(s string) []CANInterface {
 	if s == "" {
 		return nil
