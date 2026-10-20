@@ -34,6 +34,7 @@ func main() {
 		go service.ListenVirtualCAN(port)
 	}
 	service.StartSocketCAN()
+	service.StartSeeedCAN()
 
 	// Park until the container is stopped, then flush the write queue
 	// before exiting — a full batch is DB_BATCH_SIZE frames that would
